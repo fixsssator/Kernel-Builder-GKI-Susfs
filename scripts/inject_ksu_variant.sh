@@ -6,16 +6,16 @@ cd kernel_workspace
 [ -d common ] || { echo "[-] common/ not found in kernel_workspace" >&2; exit 1; }
 
 VARIANT=$1
-# Export these so the sourced scripts can use them natively
-export KSU_VARIANT_REF=$(echo "${KSU_VARIANT_REF:-}" | xargs)
-export USE_DYNAMIC_TRANSPLANT=$(echo "${USE_DYNAMIC_TRANSPLANT:-false}" | tr '[:upper:]' '[:lower:]')
 
-# 1. Map the expected directory name based on the variant's internal setup.sh hardcoding
+# 1. Map the expected directory name based on the variant's target folder
 case "${VARIANT}" in
     "KernelSU-Next")
         export MANAGER_DIR="KernelSU-Next"
         ;;
-    "SukiSU-Ultra" | "ReSukiSU" | "KernelSU" | "BakaSU")
+    "ReSukiSU")
+        export MANAGER_DIR="ReSukiSU"
+        ;;
+    "SukiSU-Ultra" | "KernelSU" | "BakaSU")
         export MANAGER_DIR="KernelSU"
         ;;
     *)
@@ -46,43 +46,6 @@ else
 fi
 
 # ========================================================================
-# KERNEL 6.6/6.12 UPSTREAM COMPATIBILITY FIXES (UNIVERSAL TARGETED WIPER)
-# ========================================================================
-echo ">>> Normalizing SELinux function declarations across all variants..."
-SELINUX_HIDE="${MANAGER_DIR}/kernel/feature/selinux_hide.c"
-
-if [ -f "$SELINUX_HIDE" ]; then
-    
-    # 1. Determine correct return type for BakaSU's __maybe_void macro
-    K_VER=$(grep "^VERSION =" common/Makefile | tr -d ' ' | cut -d'=' -f2 || echo "0")
-    K_PATCH=$(grep "^PATCHLEVEL =" common/Makefile | tr -d ' ' | cut -d'=' -f2 || echo "0")
-    
-    if [ "$K_VER" = "6" ] && [ "$K_PATCH" -ge "6" ]; then
-        COMPUTE_AV_RET="void"
-    else
-        COMPUTE_AV_RET="int"
-    fi
-    
-    # 2. Target ONLY the 3 problematic functions and explicitly wipe the junk prefixes
-    FUNCS=(
-        "security_compute_av_user_with_policy"
-        "security_context_to_sid_with_policy"
-        "security_sid_to_context_with_policy"
-    )
-
-    for FUNC in "${FUNCS[@]}"; do
-        # Strip standard prefixes (static or SUSFS_EXPORT) and their trailing spaces
-        sed -i -E "/$FUNC/ s/(static|SUSFS_EXPORT)[[:space:]]+//g" "$SELINUX_HIDE"
-        
-        # Translate BakaSU's custom macros into native C types
-        sed -i -E "/$FUNC/ s/__maybe_int/int/g" "$SELINUX_HIDE"
-        sed -i -E "/$FUNC/ s/__maybe_void/$COMPUTE_AV_RET/g" "$SELINUX_HIDE"
-    done
-
-    echo "  -> Enforced clean, native C declarations for SELinux hooks."
-fi
-
-# ========================================================================
 # KLEAF SANDBOX IMMUTABLE GATEKEEPER
 # ========================================================================
 # (These variables were populated by the sourced variant script)
@@ -101,7 +64,7 @@ if [ -f "$TARGET_KBUILD" ]; then
         echo "override KSU_COMMIT_SHA := ${SHORT_HASH}"
         echo "override KSU_GIT_BRANCH := ${UPSTREAM_BRANCH}"
         
-        # --- ReSukiSU Namespaces ---
+        # --- BakaSU/ReSukiSUNamespaces ---
         echo "override LOCAL_GIT_EXISTS := 1"
         echo "override KSU_LOCAL_VERSION := ${CALCULATED_COUNT}"
         echo "override KSU_TAG_NAME := ${CALCULATED_TAG}"
